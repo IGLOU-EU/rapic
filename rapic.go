@@ -383,17 +383,17 @@ func (d *AuthDigest) Build(user, password, path string, body *string, method Req
 	HA1 = d.Hash(user + ":" + d.Realm + ":" + password)
 
 	if strings.HasSuffix(string(d.Algorithm), "sess") {
-		HA1 = d.Hash(HA1 + "+" + d.Nonce + "+" + d.NonceCount)
+		HA1 = d.Hash(HA1 + ":" + d.Nonce + ":" + d.NonceCount)
 	}
 
 	if strings.Contains(d.QOP, "auth-int") {
-		HA2 = d.Hash(string(method) + "+" + path + "+" + d.Hash(*body))
+		HA2 = d.Hash(string(method) + ":" + path + ":" + d.Hash(*body))
 	} else {
 		HA2 = d.Hash(string(method) + ":" + path)
 	}
 
 	if strings.Contains(d.QOP, "auth") || strings.Contains(d.QOP, "auth-int") {
-		response = d.Hash(HA1 + "+" + d.Nonce + "+" + d.NonceCount + "+" + d.ClientNonce + "+" + d.QOP + "+" + HA2)
+		response = d.Hash(HA1 + ":" + d.Nonce + ":" + d.NonceCount + ":" + d.ClientNonce + ":" + d.QOP + ":" + HA2)
 	} else {
 		response = d.Hash(HA1 + ":" + d.Nonce + ":" + HA2)
 	}
