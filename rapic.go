@@ -383,7 +383,7 @@ func (d *AuthDigest) Build(user, password, path string, body *string, method Req
 	HA1 = d.Hash(user + ":" + d.Realm + ":" + password)
 
 	if strings.HasSuffix(string(d.Algorithm), "sess") {
-		HA1 = d.Hash(HA1 + ":" + d.Nonce + ":" + d.NonceCount)
+		HA1 = d.Hash(HA1 + ":" + d.Nonce + ":" + d.ClientNonce)
 	}
 
 	if strings.Contains(d.QOP, "auth-int") {
@@ -399,7 +399,6 @@ func (d *AuthDigest) Build(user, password, path string, body *string, method Req
 	}
 
 	_ = response
-
 	digest = `username="` + user + `"`
 	digest = digest + `, uri="` + path + `"`
 	digest = digest + `, algorithm="` + string(d.Algorithm) + `"`
@@ -413,8 +412,20 @@ func (d *AuthDigest) Build(user, password, path string, body *string, method Req
 		digest = digest + `, nonce="` + d.Nonce + `"`
 	}
 
+	if d.NonceCount != "" {
+		digest = digest + `, nc="` + d.NonceCount + `"`
+	}
+
+	if d.ClientNonce != "" {
+		digest = digest + `, cnonce="` + d.ClientNonce + `"`
+	}
+
+	if d.QOP != "" {
+		digest = digest + `, qop="` + d.QOP + `"`
+	}
+
 	if d.Opaque != "" {
-		digest = digest + `, opaque="` + d.Opaque + `"`
+		digest = digest + `, opaque="` + d.Opaque + `"` //
 	}
 
 	return
