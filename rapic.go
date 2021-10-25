@@ -423,13 +423,13 @@ func (d *AuthDigest) Build(user, password, path string, body *string, method Req
 // TODO
 func (d *AuthDigest) Hash(s string) (hashed string) {
 	switch d.Algorithm {
-	case DIGEST_MD5:
+	case DIGEST_MD5, DIGEST_MD5_SESS:
 		hashed = fmt.Sprintf("%x", md5.Sum([]byte(s)))
-	case DIGEST_SHA256:
+	case DIGEST_SHA256, DIGEST_SHA256_SESS:
 		hashed = fmt.Sprintf("%x", sha256.Sum256([]byte(s)))
-	case DIGEST_SHA512:
+	case DIGEST_SHA512, DIGEST_SHA512_SESS:
 		hashed = fmt.Sprintf("%x", sha512.Sum512([]byte(s)))
-	case DIGEST_SHA512256:
+	case DIGEST_SHA512256, DIGEST_SHA512256_SESS:
 		hashed = fmt.Sprintf("%x", sha512.Sum512_256([]byte(s)))
 	}
 
