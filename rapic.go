@@ -1,6 +1,7 @@
 package rapic
 
 import (
+	"bytes"
 	"crypto/md5"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -393,7 +394,8 @@ func (j *CookieJar) Clear() (err error) {
 // But retains backwards compatibility with the RFC2069
 //
 // Suppose you have filled the information in AuthDigest{}
-func (d *AuthDigest) Build(user, password string, body *string, method RequestMethods) (auth string) {
+func (d *AuthDigest) Build(user, password string, body *string, method RequestMethods) string {
+	var buffer bytes.Buffer
 	var A1, A2, digest string
 
 	// Defined under RFC7616-3.4.2 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.2
@@ -417,54 +419,55 @@ func (d *AuthDigest) Build(user, password string, body *string, method RequestMe
 		digest = d.Hash(d.Hash(A1) + ":" + d.Nonce + ":" + d.Hash(A2))
 	}
 
+	// fmt.Println(buffer.String())
 	// Formating the Authorization Header Field
 	// Defined under RFC7616-3.4 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4
-	auth = `uri="` + d.URI + `"`
-	auth = auth + `, algorithm=` + string(d.Algorithm)
-	auth = auth + `, response="` + digest + `"`
+	buffer.WriteString(`uri="` + d.URI + `"`)
+	buffer.WriteString(`, algorithm=` + string(d.Algorithm))
+	buffer.WriteString(`, response="` + digest + `"`)
 
 	// User hash or UTF-8 username declaration header
 	// Defined under RFC7616-3.4.4 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.4
 	// And under RFC7616-4 at https://datatracker.ietf.org/doc/html/rfc7616#section-4
 	if d.UserHash {
-		auth = auth + `, username="` + d.Hash(user) + `"`
+		buffer.WriteString(`, username="` + d.Hash(user) + `"`)
 	} else if isASCII(user) {
-		auth = auth + `, username="` + user + `"`
+		buffer.WriteString(`, username="` + user + `"`)
 	} else {
-		auth = auth + `, username*=UTF-8''` + url.QueryEscape(user)
+		buffer.WriteString(`, username*=UTF-8''` + url.QueryEscape(user))
 	}
 
 	if d.UserHash {
-		auth = auth + `, userhash=true`
+		buffer.WriteString(`, userhash=true`)
 	} else {
-		auth = auth + `, userhash=false`
+		buffer.WriteString(`, userhash=false`)
 	}
 
 	if d.Realm != "" {
-		auth = auth + `, realm="` + d.Realm + `"`
+		buffer.WriteString(`, realm="` + d.Realm + `"`)
 	}
 
 	if d.Nonce != "" {
-		auth = auth + `, nonce="` + d.Nonce + `"`
+		buffer.WriteString(`, nonce="` + d.Nonce + `"`)
 	}
 
 	if d.NC != "" {
-		auth = auth + `, nc=` + d.NC
+		buffer.WriteString(`, nc=` + d.NC)
 	}
 
 	if d.CNonce != "" {
-		auth = auth + `, cnonce="` + d.CNonce + `"`
+		buffer.WriteString(`, cnonce="` + d.CNonce + `"`)
 	}
 
 	if d.QOP != "" {
-		auth = auth + `, qop=` + d.QOP
+		buffer.WriteString(`, qop=` + d.QOP)
 	}
 
 	if d.Opaque != "" {
-		auth = auth + `, opaque="` + d.Opaque + `"`
+		buffer.WriteString(`, opaque="` + d.Opaque + `"`)
 	}
 
-	return
+	return buffer.String()
 }
 
 // TODO
