@@ -34,7 +34,6 @@ const (
 type AuthScheme string
 
 const (
-	AUTH_URL    AuthScheme = "URL"
 	AUTH_BASIC  AuthScheme = "Basic"
 	AUTH_BEARER AuthScheme = "Bearer"
 	AUTH_DIGEST AuthScheme = "Digest"
@@ -104,10 +103,7 @@ type AuthDigest struct {
 type Client struct {
 	Settings Settings
 
-	Scheme   string
-	Endpoint string
-
-	Path  string
+	URL   *url.URL
 	Query url.Values
 
 	Header http.Header
@@ -262,10 +258,6 @@ func cookieParse(cookies []string) (c []*http.Cookie) {
 // This function require a Endpoint URL with scheme Path.
 // You can also specify a Auth with the optinal Authorization arg
 func New(endpoint string, auth ...Authorization) (main Client, err error) {
-	URL, err := url.Parse(endpoint)
-	if err != nil {
-		return
-	}
 
 	main.Settings = Settings{
 		Follow:        true,
@@ -278,11 +270,14 @@ func New(endpoint string, auth ...Authorization) (main Client, err error) {
 		WaitRetry:     10,
 	}
 
-	main.Scheme = URL.Scheme
-	URL.Scheme = ""
-	main.Endpoint = pathFormatting(URL.String())
+	if main.URL, err = url.Parse(endpoint); err != nil {
+		return
+	}
 
-	main.Query = make(url.Values)
+	if main.Query, err = url.ParseQuery(main.URL.RawQuery); err != nil {
+		return
+	}
+
 	main.Header = make(http.Header)
 	main.Authorization.Digest.Algorithm = DIGEST_SHA256
 
@@ -303,7 +298,7 @@ func (parent *Client) NewChild(path ...string) (child Client) {
 	child = *parent
 
 	if len(path) > 0 {
-		child.Path = child.Path + pathFormatting(path[0])
+		child.URL.Path = child.URL.Path + pathFormatting(path[0])
 	}
 
 	return
@@ -498,48 +493,23 @@ func (c *Client) FlushQuery() {
 	c.Query = url.Values{}
 }
 
-// URI constructs the URI of the target request
-func (c *Client) URI() (uri string) {
-	// Scheme
-	uri = c.Scheme + "://"
-
-	// Authority userinfo
-	if c.Authorization.Scheme == AUTH_URL {
-		uri = uri +
-			url.QueryEscape(c.Authorization.Username) + `:` +
-			url.QueryEscape(c.Authorization.Password) + `@`
-	}
-
-	// Authority + Path
-	uri = uri + c.Endpoint + c.Path
-
-	// Query
-	if len(c.Query) > 0 {
-		uri = uri + `?` + c.Query.Encode()
-	}
-
-	return
-}
-
 // TODO
-func (c *Client) Request(method RequestMethods, uri string, body *string, res *http.Response) (err error) {
+func (c *Client) Request(method RequestMethods, body *string, res *http.Response) (err error) {
 	req := &http.Request{}
 
+	c.URL.RawQuery = c.Query.Encode()
+
 	if body == nil {
-		if req, err = http.NewRequest(string(method), uri, nil); err != nil {
+		if req, err = http.NewRequest(string(method), c.URL.String(), nil); err != nil {
 			return
 		}
 	} else {
-		if req, err = http.NewRequest(string(method), uri, strings.NewReader(*body)); err != nil {
+		if req, err = http.NewRequest(string(method), c.URL.String(), strings.NewReader(*body)); err != nil {
 			return
 		}
 	}
 
 	// Auth
-	if c.Authorization.Scheme == AUTH_DIGEST {
-		c.Authorization.Digest.URI = c.Path
-	}
-
 	if c.Authorization.Scheme != "" {
 		switch c.Authorization.Scheme {
 		case AUTH_BASIC:
@@ -547,6 +517,12 @@ func (c *Client) Request(method RequestMethods, uri string, body *string, res *h
 		case AUTH_BEARER:
 			c.Header.Set("Authorization", "Bearer "+c.Authorization.Token)
 		case AUTH_DIGEST:
+			if c.Authorization.Digest.URI != "*" {
+				c.Authorization.Digest.URI = c.URL.Path
+			}
+			if c.Authorization.Digest.Opaque == "" {
+				c.Authorization.Digest.Opaque = c.URL.Opaque
+			}
 			c.Header.Set("Authorization", "Digest "+c.Authorization.Digest.Build(
 				c.Authorization.Username,
 				c.Authorization.Password,
@@ -577,7 +553,7 @@ func (c *Client) Request(method RequestMethods, uri string, body *string, res *h
 					req.Header.Del("Referer")
 				}
 
-				if req.URL.Host != c.Endpoint && !c.Settings.FollowAuth {
+				if req.URL.Host != c.URL.Host && !c.Settings.FollowAuth {
 					req.Header.Del("Authorization")
 				}
 
@@ -603,7 +579,7 @@ func (c *Client) Request(method RequestMethods, uri string, body *string, res *h
 
 	if c.Settings.AutoCookie {
 		if err == nil {
-			c.Cookie.Add(uri, cookieParse(res.Header.Values("Set-Cookie"))...)
+			c.Cookie.Add(c.URL.String(), cookieParse(res.Header.Values("Set-Cookie"))...)
 		}
 	}
 
