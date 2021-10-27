@@ -152,3 +152,25 @@ func TestCookie(t *testing.T) {
 		tError(!reflect.DeepEqual(v.cookie, miniJar), fmt.Sprintf("Cookie Raw: %s\nCookie Expected: %s\nCookie Gived: %s\n\n", v.raw, printCookies(v.cookie), printCookies(miniJar)), t)
 	}
 }
+
+func TestIsASCII(t *testing.T) {
+	test := []struct {
+		g string
+		e bool
+	}{
+		{"", true},
+		{"/", true},
+		{"Je suis une Water Chip !?", true},
+		{"No, you're not !", true},
+		{"Minsc_and_Boo", true},
+		{"اركانوم: اوف ستايموركس اند ماجيك اوبسكورا", false},
+		{"עטיפת המשחק", false},
+		{"Линукс", false},
+		{"维基百科", false},
+		{"нo my ******* striתg", false},
+	}
+
+	for _, v := range test {
+		tError(isASCII(v.g) != v.e, fmt.Sprint("String: ", v.g, ", Expect: ", v.e, ", Returned: ", !v.e), t)
+	}
+}

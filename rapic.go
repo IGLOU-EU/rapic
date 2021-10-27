@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"golang.org/x/net/publicsuffix"
 )
@@ -40,6 +41,9 @@ const (
 	AUTH_CUSTOM AuthScheme = "Custom"
 )
 
+// DigestAlgo is for Hash Algorithms for HTTP Digest Authentication
+// But add SHA512 support to be futureproof
+// Defined under RFC7616-6.1 at https://datatracker.ietf.org/doc/html/rfc7616#section-6.1
 type DigestAlgo string
 
 const (
@@ -81,16 +85,20 @@ type Authorization struct {
 	Value string
 }
 
+// AuthDigest is the available Authorization Digest Setting Field
+// Defined under RFC7616-3.4 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4
 type AuthDigest struct {
 	// The default algorithm used is DIGEST_SHA256
 	Algorithm DigestAlgo
 
-	Realm       string
-	Nonce       string
-	QOP         string
-	NonceCount  string
-	ClientNonce string
-	Opaque      string
+	Realm    string
+	URI      string
+	QOP      string
+	Nonce    string
+	CNonce   string
+	NC       string
+	UserHash bool
+	Opaque   string
 }
 
 type Client struct {
@@ -127,11 +135,24 @@ type Settings struct {
 	WaitRetry time.Duration
 }
 
+// TODO
 type Response struct {
 }
 
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > unicode.MaxASCII {
+			return false
+		}
+	}
+	return true
+}
+
+// reqIsSuccess checks whether a request is successful.
+// a request is successful when the http code is >= 100 or < 400
+// with an exception at 401, in accordance with Digest Auth RFC7616-3.3.
 func reqIsSuccess(code int) bool {
-	if code >= 200 && code < 400 {
+	if (code >= 100 && code < 400) || code == 401 {
 		return true
 	}
 
@@ -372,60 +393,80 @@ func (j *CookieJar) Clear() (err error) {
 	return
 }
 
-// TODO
-func (d *AuthDigest) Build(user, password, path string, body *string, method RequestMethods) (digest string) {
-	var HA1, HA2, response string
+// Build is the Digest Access Authentication builder
+// Generate a valid Digest header value in accordance with the RFC7616
+// But retains backwards compatibility with the RFC2069
+//
+// Suppose you have filled the information in AuthDigest{}
+func (d *AuthDigest) Build(user, password string, body *string, method RequestMethods) (auth string) {
+	var A1, A2, digest string
 
-	if path == "" {
-		path = "/"
-	}
-
-	HA1 = d.Hash(user + ":" + d.Realm + ":" + password)
-
+	// Defined under RFC7616-3.4.2 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.2
+	A1 = user + ":" + d.Realm + ":" + password
 	if strings.HasSuffix(string(d.Algorithm), "sess") {
-		HA1 = d.Hash(HA1 + ":" + d.Nonce + ":" + d.ClientNonce)
+		A1 = d.Hash(A1) + ":" + d.Nonce + ":" + d.CNonce
 	}
 
-	if strings.Contains(d.QOP, "auth-int") {
-		HA2 = d.Hash(string(method) + ":" + path + ":" + d.Hash(*body))
+	// Defined under RFC7616-3.4.3 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.2
+	if d.QOP == "auth-int" {
+		A2 = string(method) + ":" + d.URI + ":" + d.Hash(*body)
 	} else {
-		HA2 = d.Hash(string(method) + ":" + path)
+		A2 = string(method) + ":" + d.URI
 	}
 
-	if strings.Contains(d.QOP, "auth") || strings.Contains(d.QOP, "auth-int") {
-		response = d.Hash(HA1 + ":" + d.Nonce + ":" + d.NonceCount + ":" + d.ClientNonce + ":" + d.QOP + ":" + HA2)
+	// Defined under RFC7616-3.4.1 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.2
+	// But not folow the deprecated backward compatibility with RFC2069-2.1.2
+	if d.QOP == "auth" || d.QOP == "auth-int" {
+		digest = d.Hash(d.Hash(A1) + ":" + d.Nonce + ":" + d.NC + ":" + d.CNonce + ":" + d.QOP + ":" + d.Hash(A2))
 	} else {
-		response = d.Hash(HA1 + ":" + d.Nonce + ":" + HA2)
+		digest = d.Hash(d.Hash(A1) + ":" + d.Nonce + ":" + d.Hash(A2))
 	}
 
-	_ = response
-	digest = `username="` + user + `"`
-	digest = digest + `, uri="` + path + `"`
-	digest = digest + `, algorithm="` + string(d.Algorithm) + `"`
-	digest = digest + `, response="` + response + `"`
+	// Formating the Authorization Header Field
+	// Defined under RFC7616-3.4 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4
+	auth = `uri="` + d.URI + `"`
+	auth = auth + `, algorithm=` + string(d.Algorithm)
+	auth = auth + `, response="` + digest + `"`
+
+	// User hash or UTF-8 username declaration header
+	// Defined under RFC7616-3.4.4 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.4
+	// And under RFC7616-4 at https://datatracker.ietf.org/doc/html/rfc7616#section-4
+	if d.UserHash {
+		auth = auth + `, username="` + d.Hash(user) + `"`
+	} else if isASCII(user) {
+		auth = auth + `, username="` + user + `"`
+	} else {
+		auth = auth + `, username*=UTF-8''` + url.QueryEscape(user)
+	}
+
+	if d.UserHash {
+		auth = auth + `, userhash=true`
+	} else {
+		auth = auth + `, userhash=false`
+	}
 
 	if d.Realm != "" {
-		digest = digest + `, realm="` + d.Realm + `"`
+		auth = auth + `, realm="` + d.Realm + `"`
 	}
 
 	if d.Nonce != "" {
-		digest = digest + `, nonce="` + d.Nonce + `"`
+		auth = auth + `, nonce="` + d.Nonce + `"`
 	}
 
-	if d.NonceCount != "" {
-		digest = digest + `, nc="` + d.NonceCount + `"`
+	if d.NC != "" {
+		auth = auth + `, nc=` + d.NC
 	}
 
-	if d.ClientNonce != "" {
-		digest = digest + `, cnonce="` + d.ClientNonce + `"`
+	if d.CNonce != "" {
+		auth = auth + `, cnonce="` + d.CNonce + `"`
 	}
 
 	if d.QOP != "" {
-		digest = digest + `, qop="` + d.QOP + `"`
+		auth = auth + `, qop=` + d.QOP
 	}
 
 	if d.Opaque != "" {
-		digest = digest + `, opaque="` + d.Opaque + `"` //
+		auth = auth + `, opaque="` + d.Opaque + `"`
 	}
 
 	return
@@ -481,7 +522,7 @@ func (c *Client) URI() (uri string) {
 }
 
 // TODO
-func (c *Client) Request(method RequestMethods, uri string, body *string, resp *Response) (res *http.Response, err error) {
+func (c *Client) Request(method RequestMethods, uri string, body *string, res *http.Response) (err error) {
 	req := &http.Request{}
 
 	if body == nil {
@@ -495,6 +536,10 @@ func (c *Client) Request(method RequestMethods, uri string, body *string, resp *
 	}
 
 	// Auth
+	if c.Authorization.Scheme == AUTH_DIGEST {
+		c.Authorization.Digest.URI = c.Path
+	}
+
 	if c.Authorization.Scheme != "" {
 		switch c.Authorization.Scheme {
 		case AUTH_BASIC:
@@ -505,7 +550,6 @@ func (c *Client) Request(method RequestMethods, uri string, body *string, resp *
 			c.Header.Set("Authorization", "Digest "+c.Authorization.Digest.Build(
 				c.Authorization.Username,
 				c.Authorization.Password,
-				c.Path,
 				body,
 				method,
 			))
