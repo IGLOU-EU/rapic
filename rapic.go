@@ -41,7 +41,7 @@ const (
 	AUTH_CUSTOM AuthScheme = "Custom"
 )
 
-// DigestAlgo is for Hash Algorithms for HTTP Digest Authentication
+// DigestAlgo is Hash Algorithms for HTTP Digest Authentication
 // But add SHA512 support to be futureproof
 // Defined under RFC7616-6.1 at https://datatracker.ietf.org/doc/html/rfc7616#section-6.1
 type DigestAlgo string
@@ -404,7 +404,7 @@ func (d *AuthDigest) Build(user, password string, body *string, method RequestMe
 		A1 = d.Hash(A1) + ":" + d.Nonce + ":" + d.CNonce
 	}
 
-	// Defined under RFC7616-3.4.3 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.2
+	// Defined under RFC7616-3.4.3 at https://datatracker.ietf.org/doc/html/rfc7616#section-3.4.3
 	if d.QOP == "auth-int" {
 		A2 = string(method) + ":" + d.URI + ":" + d.Hash(*body)
 	} else {
@@ -470,7 +470,12 @@ func (d *AuthDigest) Build(user, password string, body *string, method RequestMe
 	return buffer.String()
 }
 
-// TODO
+// Hash is the hashing function for Digest Access Authentication
+// AuthDigest can be used with Algorithm
+// - MD5 (RFC2069 and RFC2617)
+// - SHA-256 (RFC7616)
+// - SHA-512-256 (RFC7616)
+// - SHA-512 (for futureproof)
 func (d *AuthDigest) Hash(s string) (hashed string) {
 	switch d.Algorithm {
 	case DIGEST_MD5, DIGEST_MD5_SESS:
